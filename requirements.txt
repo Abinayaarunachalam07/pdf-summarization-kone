@@ -1,5 +1,6 @@
 streamlit
 PyPDF2
-pdfminer.six
-nltk
-reportlab
+pdf2image
+imagehash
+Pillow
+opencv-python-headless
