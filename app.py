@@ -1,56 +1,52 @@
 import streamlit as st
 import os
-import hashlib
 from PyPDF2 import PdfReader, PdfWriter
+from pdf2image import convert_from_path
+from PIL import Image
+import imagehash
+import tempfile
 
-# ------------------ Helper Functions ------------------
+# ---------------- Helper Functions ----------------
 
-def page_hash(page):
-    """
-    Create a stable hash for a PDF page using text + structure.
-    This helps detect duplicate pages including text, tables, images.
-    """
+def get_text_hash(page):
     text = page.extract_text() or ""
-    raw = text.encode("utf-8")
-    return hashlib.md5(raw).hexdigest()
+    return hash(text.strip())
 
-def merge_pdfs_remove_duplicates(pdf_paths, output_path):
+def get_image_hash(page_image):
+    return imagehash.phash(page_image)
+
+def dedup_merge(pdf_paths, output_pdf_path):
     writer = PdfWriter()
-    seen_pages = set()
-    total_pages = 0
-    kept_pages = 0
+    seen_hashes = set()
 
     for pdf_path in pdf_paths:
         reader = PdfReader(pdf_path)
 
-        for page in reader.pages:
-            total_pages += 1
-            h = page_hash(page)
+        # convert pages to images
+        images = convert_from_path(pdf_path, dpi=150)
 
-            if h not in seen_pages:
+        for idx, page in enumerate(reader.pages):
+            text_hash = get_text_hash(page)
+            img_hash = get_image_hash(images[idx])
+
+            combined = (text_hash, str(img_hash))
+
+            if combined not in seen_hashes:
+                seen_hashes.add(combined)
                 writer.add_page(page)
-                seen_pages.add(h)
-                kept_pages += 1
 
-    with open(output_path, "wb") as f:
+    with open(output_pdf_path, "wb") as f:
         writer.write(f)
 
-    return total_pages, kept_pages
+    return len(seen_hashes)
 
-# ------------------ Streamlit UI ------------------
+# ---------------- Streamlit App ----------------
 
-st.set_page_config(page_title="PDF Deduplicator", layout="centered")
-
-st.title("📄 PDF Combiner & Deduplicator (Offline)")
-st.write(
-    "Combine 2 or more PDFs into one and automatically remove duplicate "
-    "text, tables, images, and infographics. Fully offline & confidential."
-)
+st.title("PDF Deduplicator & Combiner")
+st.write("Upload PDFs and remove duplicate text, tables, and images.")
 
 uploaded_files = st.file_uploader(
-    "Upload PDF files",
-    type=["pdf"],
-    accept_multiple_files=True
+    "Upload PDFs (≥ 2)", type="pdf", accept_multiple_files=True
 )
 
 if uploaded_files and len(uploaded_files) >= 2:
@@ -58,28 +54,26 @@ if uploaded_files and len(uploaded_files) >= 2:
     os.makedirs("output", exist_ok=True)
 
     pdf_paths = []
-
     for file in uploaded_files:
         path = os.path.join("input", file.name)
         with open(path, "wb") as f:
             f.write(file.getbuffer())
         pdf_paths.append(path)
 
-    if st.button("🚀 Combine PDFs"):
-        with st.spinner("Processing PDFs and removing duplicates..."):
-            output_path = os.path.join("output", "final_combined.pdf")
-            total, kept = merge_pdfs_remove_duplicates(pdf_paths, output_path)
+    if st.button("🔁 Merge & Remove Duplicates"):
+        with st.spinner("Processing..."):
+            output_path = os.path.join("output", "final_dedup.pdf")
+            count = dedup_merge(pdf_paths, output_path)
 
-        st.success("✅ Final PDF created successfully!")
-        st.write(f"📊 Total pages processed: **{total}**")
-        st.write(f"📉 Pages after deduplication: **{kept}**")
+        st.success("✅ Done!")
+        st.write(f"📄 Pages after deduplication: {count}")
 
         with open(output_path, "rb") as f:
             st.download_button(
-                "⬇ Download Final PDF",
+                "⬇ Download Result PDF",
                 f,
-                file_name="final_combined.pdf",
+                file_name="final_dedup.pdf",
                 mime="application/pdf"
             )
 else:
-    st.info("Please upload **at least 2 PDFs** to start.")
+    st.info("Please upload *at least 2 PDFs*!")
