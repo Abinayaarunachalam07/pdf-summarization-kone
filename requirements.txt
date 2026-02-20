@@ -2,3 +2,4 @@ streamlit
 PyPDF2
 pdfminer.six
 nltk
+reportlab
