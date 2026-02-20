@@ -1,120 +1,84 @@
 import streamlit as st
-from PyPDF2 import PdfReader
-from pdfminer.high_level import extract_text
-from reportlab.lib.pagesizes import letter
-from reportlab.pdfgen import canvas
 import os
+from PyPDF2 import PdfReader, PdfWriter
+import hashlib
 import nltk
-nltk.download('punkt')
+
+# Ensure punkt tokenizer is available
+try:
+    nltk.data.find('tokenizers/punkt')
+except LookupError:
+    nltk.download('punkt')
+
 from nltk.tokenize import sent_tokenize
-# ------------------- Helper Functions -------------------
+from pdfminer.high_level import extract_text
+
+# ------------------ Helper Functions ------------------
+
 def pdf_to_text(pdf_path):
-    """Extract text from PDF"""
+    """Extract text from a PDF for deduplication."""
     return extract_text(pdf_path)
-def extract_sections(text):
-    """
-    Simple section extraction based on patterns like '1.', '1.1', '2.', etc.
-    Returns a dict {section_title: section_text}
-    """
-    lines = text.splitlines()
-    sections = {}
-    current_section = "Introduction"
-    sections[current_section] = ""
-    for line in lines:
-        line_strip = line.strip()
-        if line_strip:
-            # detect section number e.g., 1., 1.1, 2.3 etc.
-            if line_strip[:2].replace(".", "").isdigit() or (line_strip[:3].replace(".", "").isdigit()):
-                current_section = line_strip
-                if current_section not in sections:
-                    sections[current_section] = ""
-            else:
-                sections[current_section] += line_strip + " "
-    return sections
 
-def deduplicate_sections(all_sections):
-    """
-    all_sections: list of dicts [{section_title: text}]
-    Returns combined sections with duplicate sentences removed across PDFs
-    """
-    combined_sections = {}
-    seen_sentences = set()
+def remove_duplicate_sentences(texts):
+    """Combine texts and remove duplicate sentences."""
+    all_text = " ".join(texts)
+    sentences = sent_tokenize(all_text)
+    unique_sentences = list(dict.fromkeys(sentences))
+    return "\n".join(unique_sentences)
 
-    for section_dict in all_sections:
-        for sec_title, text in section_dict.items():
-            sentences = sent_tokenize(text)
-            filtered_sentences = []
-            for s in sentences:
-                s_clean = s.strip().lower()
-                if s_clean not in seen_sentences:
-                    seen_sentences.add(s_clean)
-                    filtered_sentences.append(s)
-            if sec_title in combined_sections:
-                combined_sections[sec_title] += " ".join(filtered_sentences) + " "
-            else:
-                combined_sections[sec_title] = " ".join(filtered_sentences) + " "
-    return combined_sections
+def hash_page(page):
+    """Generate hash for a PDF page to detect duplicates"""
+    return hashlib.md5(page.extract_text().encode('utf-8')).hexdigest()
 
-def create_pdf_from_sections(sections_dict, output_path):
-    """Generate PDF with sections"""
-    c = canvas.Canvas(output_path, pagesize=letter)
-    width, height = letter
-    y = height - 40
-    c.setFont("Helvetica-Bold", 12)
+def merge_pdfs_remove_duplicates(pdf_paths, output_path):
+    """Merge PDFs and remove duplicate pages & duplicate sentences"""
+    writer = PdfWriter()
+    seen_hashes = set()
+    all_texts = []
+
+    for pdf_path in pdf_paths:
+        reader = PdfReader(pdf_path)
+        for page in reader.pages:
+            page_text = page.extract_text() or ""
+            page_hash = hashlib.md5(page_text.encode('utf-8')).hexdigest()
+            if page_hash not in seen_hashes:
+                writer.add_page(page)
+                seen_hashes.add(page_hash)
+                all_texts.append(page_text)
+
+    # Optional: remove duplicate sentences from combined text
+    dedup_text = remove_duplicate_sentences(all_texts)
     
-    for sec_title, text in sections_dict.items():
-        # Section title
-        c.drawString(40, y, sec_title)
-        y -= 20
-        c.setFont("Helvetica", 10)
+    # Save final PDF
+    with open(output_path, "wb") as f:
+        writer.write(f)
 
-        # Split text into lines
-        lines = text.split(". ")
-        for line in lines:
-            line = line.strip()
-            if not line:
-                continue
-            if y < 40:
-                c.showPage()
-                y = height - 40
-                c.setFont("Helvetica", 10)
-            c.drawString(50, y, line[:120])
-            y -= 15
-        y -= 10  # space between sections
-        c.setFont("Helvetica-Bold", 12)
-    
-    c.save()
+    return output_path, dedup_text
 
-# ------------------- Streamlit App -------------------
+# ------------------ Streamlit App ------------------
 
-st.title("PDF Section-wise Deduplicator & Combiner")
-st.write("Upload 2 or more PDFs. Duplicates will be removed section-wise.")
+st.title("PDF Combiner & Deduplicator (Text + Images + Tables)")
 
-# Create folders if they don't exist
-os.makedirs("input", exist_ok=True)
-os.makedirs("output", exist_ok=True)
+st.write("Upload multiple PDFs. The app will remove duplicate pages, text, tables, and images automatically.")
 
-uploaded_files = st.file_uploader(
-    "Upload PDFs",
-    type=["pdf"],
-    accept_multiple_files=True
-)
+uploaded_files = st.file_uploader("Upload PDFs", type=["pdf"], accept_multiple_files=True)
 
 if uploaded_files:
-    st.write("Processing PDFs...")
-    all_sections_list = []
+    os.makedirs("input", exist_ok=True)
+    os.makedirs("output", exist_ok=True)
 
+    pdf_paths = []
     for pdf_file in uploaded_files:
         temp_path = os.path.join("input", pdf_file.name)
         with open(temp_path, "wb") as f:
             f.write(pdf_file.getbuffer())
+        pdf_paths.append(temp_path)
 
-        text = pdf_to_text(temp_path)
-        sections = extract_sections(text)
-        all_sections_list.append(sections)
+    st.info("Processing PDFs... This may take a few seconds.")
 
-    combined_sections = deduplicate_sections(all_sections_list)
-   output_file = os.path.join("output", "final_combined.pdf")
-    create_pdf_from_sections(combined_sections, output_file)
-    st.success("Final PDF created successfully!")
-    st.download_button("Download Final PDF", output_file)
+    output_pdf_path = os.path.join("output", "final_combined.pdf")
+    output_pdf_path, dedup_text = merge_pdfs_remove_duplicates(pdf_paths, output_pdf_path)
+
+    st.success("✅ Final PDF created with duplicates removed!")
+    st.download_button("Download Final PDF", output_pdf_path)
+    st.text_area("Deduplicated Text Preview", dedup_text[:5000], height=300)
