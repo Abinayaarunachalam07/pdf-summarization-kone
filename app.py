@@ -5,16 +5,12 @@ from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
 import os
 import nltk
-
 nltk.download('punkt')
 from nltk.tokenize import sent_tokenize
-
 # ------------------- Helper Functions -------------------
-
 def pdf_to_text(pdf_path):
     """Extract text from PDF"""
     return extract_text(pdf_path)
-
 def extract_sections(text):
     """
     Simple section extraction based on patterns like '1.', '1.1', '2.', etc.
@@ -24,7 +20,6 @@ def extract_sections(text):
     sections = {}
     current_section = "Introduction"
     sections[current_section] = ""
-
     for line in lines:
         line_strip = line.strip()
         if line_strip:
@@ -119,9 +114,7 @@ if uploaded_files:
         all_sections_list.append(sections)
 
     combined_sections = deduplicate_sections(all_sections_list)
-
-    output_file = os.path.join("output", "final_combined.pdf")
+   output_file = os.path.join("output", "final_combined.pdf")
     create_pdf_from_sections(combined_sections, output_file)
-
     st.success("Final PDF created successfully!")
     st.download_button("Download Final PDF", output_file)
