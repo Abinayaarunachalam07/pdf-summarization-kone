@@ -7,6 +7,7 @@ from reportlab.pdfgen import canvas
 from PIL import Image
 import io
 import re
+import camelot  # for table extraction
 
 # ------------------- Folders -------------------
 os.makedirs("input", exist_ok=True)
@@ -30,6 +31,16 @@ def extract_text_sentences(pdf_path):
         text = page.get_text()
         sentences.extend(simple_sent_tokenize(text))
     return sentences
+
+def extract_tables(pdf_path):
+    """Extract tables from PDF and convert to text"""
+    tables_text = []
+    tables = camelot.read_pdf(pdf_path, pages='all', flavor='stream')  # use 'lattice' if table has lines
+    for table in tables:
+        df = table.df  # Pandas dataframe
+        text = "\n".join(["\t".join(row) for row in df.values])
+        tables_text.append(text)
+    return tables_text
 
 def extract_images(pdf_path):
     """Extract images from PDF as byte arrays"""
@@ -99,8 +110,8 @@ def create_clean_pdf(text_lines, images, output_path):
 
 # ------------------- Streamlit App -------------------
 
-st.title("PDF Deduplicator & Merger (Text + Images)")
-st.write("Upload 2 or more PDFs. Duplicates (text & images) will be removed.")
+st.title("PDF Deduplicator & Merger (Text + Tables + Images)")
+st.write("Upload 2 or more PDFs. Duplicates in text, tables, and images will be removed.")
 
 uploaded_files = st.file_uploader(
     "Upload PDFs",
@@ -117,10 +128,18 @@ if uploaded_files:
         with open(path, "wb") as f:
             f.write(file.getbuffer())
 
+        # Extract text
         all_sentences.extend(extract_text_sentences(path))
+
+        # Extract tables as text
+        tables_texts = extract_tables(path)
+        for t_text in tables_texts:
+            all_sentences.extend(simple_sent_tokenize(t_text))
+
+        # Extract images
         all_images.extend(extract_images(path))
 
-    # ---- Deduplicate text ----
+    # ---- Deduplicate text + tables ----
     seen_text = set()
     final_text = []
     for s in all_sentences:
@@ -138,6 +157,7 @@ if uploaded_files:
             seen_images.add(h)
             final_images.append(img)
 
+    # ---- Create final PDF ----
     output_pdf = "output/final_deduplicated.pdf"
     create_clean_pdf(final_text, final_images, output_pdf)
 
