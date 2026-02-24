@@ -46,23 +46,47 @@ def image_hash(img_bytes):
     return hashlib.md5(img_bytes).hexdigest()
 
 def create_clean_pdf(text_lines, images, output_path):
-    """Create PDF with deduplicated text and images"""
+    """Create PDF with deduplicated text and images properly aligned"""
     c = canvas.Canvas(output_path, pagesize=A4)
     width, height = A4
-    y = height - 40
-
+    y = height - 50
+    line_height = 14
     c.setFont("Helvetica", 10)
 
-    # Write text
+    # Reconstruct paragraphs with proper line wrapping
+    paragraph = ""
     for line in text_lines:
-        if y < 50:
-            c.showPage()
-            y = height - 40
-            c.setFont("Helvetica", 10)
-        c.drawString(40, y, line[:110])
-        y -= 14
+        if paragraph:
+            paragraph += " " + line
+        else:
+            paragraph = line
 
-    # Write images
+        words = paragraph.split()
+        current_line = ""
+        for word in words:
+            if len(current_line + " " + word) > 100:  # wrap line
+                if y < 50:
+                    c.showPage()
+                    y = height - 50
+                    c.setFont("Helvetica", 10)
+                c.drawString(40, y, current_line)
+                y -= line_height
+                current_line = word
+            else:
+                if current_line:
+                    current_line += " " + word
+                else:
+                    current_line = word
+        if current_line:
+            if y < 50:
+                c.showPage()
+                y = height - 50
+                c.setFont("Helvetica", 10)
+            c.drawString(40, y, current_line)
+            y -= line_height
+        paragraph = ""
+
+    # Add images
     for img_bytes in images:
         img = Image.open(io.BytesIO(img_bytes))
         img_path = "temp_img.png"
