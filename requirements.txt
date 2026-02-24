@@ -2,3 +2,4 @@ streamlit
 pymupdf
 reportlab
 pillow
+camelot-py[cv]
